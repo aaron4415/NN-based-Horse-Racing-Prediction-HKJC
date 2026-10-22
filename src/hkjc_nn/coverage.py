@@ -66,13 +66,15 @@ FEATURE_SPEC: tuple[FeatureRequirement, ...] = (
     FeatureRequirement("騎練", "騎練組合 / jockey-trainer combo", ("jockey_id_trainer_id_prior_rate",), "core"),
     # ---- 文字 -----------------------------------------------------------------
     FeatureRequirement("文字", "獸醫報告 / veterinary record", (), "unavailable",
-                       "HKJC 嘅 veterinary record endpoint 唔會按馬匹過濾，每匹馬都係同一份名單"),
+                       "兩個 endpoint（veterinaryrecord / overecord）都唔按馬匹過濾，"
+                       "每匹馬都係同一份 population 名單"),
     FeatureRequirement("文字", "傷患 / injury (days since)", (), "unavailable",
                        "同上：冇逐馬嘅傷患紀錄"),
     FeatureRequirement("文字", "晨操評語 / trackwork notes", (), "unavailable",
                        "HKJC 只公開當日 trackwork，冇歷史賽事嘅評語"),
     FeatureRequirement("文字", "馬評 / pre-race preview", (), "unavailable",
-                       "HKJC 冇公開馬評原文"),
+                       "馬評係有嘅，但只喺每個賽馬日嘅 Form Guide PDF 入面；"
+                       "普通賽事冇可推導嘅 PDF URL，只有特殊賽事有存檔"),
     # ---- 市場 -----------------------------------------------------------------
     FeatureRequirement("市場", "賠率 / win odds", ("win_odds",), "core",
                        "只有 SP（開跑後定價），非開盤賠率"),

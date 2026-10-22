@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>研究全流程 — NN vs Benter on HKJC</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          cream:  '#f7f5f0',
+          paper:  '#ffffff',
+          ink:    '#14171e',
+          body:   '#3a4256',
+          muted:  '#7c7a72',
+          line:   '#e9e3d6',
+          primary:'#2f6f5e',
+          amber:  '#c97b3f',
+          rose:   '#b06367',
+        },
+        fontFamily: {
+          sans:  ['Outfit', 'sans-serif'],
+          serif: ['"DM Serif Display"', 'serif'],
+          mono:  ['"JetBrains Mono"', 'monospace'],
+        }
+      }
+    }
+  }
+</script>
+<style>
+  html { scroll-behavior: smooth; }
+  /* Tailwind's preflight resets heading sizes, paragraph margins and line-height
+     on bare element selectors, and the CDN injects it *after* this block — so
+     these rules are scoped to `body` to win the specificity contest. */
+  body { background: #f7f5f0; color: #3a4256; font-family: Outfit, sans-serif; font-size: 15px; overflow-x: hidden; }
+  html body { line-height: 1.62; }
+  body h1, body h2, body h3, body h4 { font-family: "DM Serif Display", serif; font-weight: 400; letter-spacing: -0.005em; color: #14171e; }
+  body h1 { font-size: 34px; line-height: 1.18; }
+  body h2 { font-size: 25px; line-height: 1.25; }
+  body h3 { font-size: 16px; font-weight: 600; color: #14171e; }
+  body p  { margin-bottom: 10px; }
+  .card { background: #fff; border: 1px solid #e9e3d6; border-radius: 16px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+  .card-lift { transition: all .2s ease; }
+  .card-lift:hover { transform: translateY(-2px); box-shadow: 0 8px 22px -6px rgba(0,0,0,.10); }
+  .mono { font-family: "JetBrains Mono", monospace; }
+  .eyebrow { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: #7c7a72; font-weight: 600; }
+  .rule { height: 1px; background: #e9e3d6; border: 0; }
+
+  /* ---- gap-to-market bars ---- */
+  .gaprow { display: grid; grid-template-columns: 132px 1fr 74px; gap: 12px; align-items: center; padding: 5px 0; }
+  .gaptrack { position: relative; height: 20px; background: #f2efe8; border-radius: 7px; overflow: hidden; }
+  .gapzero { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #14171e; opacity: .55; }
+  .gapfill { position: absolute; top: 0; bottom: 0; border-radius: 6px; }
+  .gapfill.worse { background: #b06367; }
+  .gapfill.better{ background: #2f6f5e; }
+  .gapval { font-family: "JetBrains Mono", monospace; font-size: 12px; text-align: right; }
+
+  /* ---- coverage chips ---- */
+  .chip { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; padding:4px 10px; border-radius:999px; border:1px solid #e9e3d6; background:#fff; }
+  .dot { width:7px; height:7px; border-radius:50%; }
+  .stacked { display:flex; height:26px; border-radius:9px; overflow:hidden; }
+  .stacked > div { display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:600; color:#fff; }
+
+  /* ---- timeline ---- */
+  .timeline { list-style:none; padding:0; margin:0; position:relative; }
+  .timeline::before { content:""; position:absolute; left:9px; top:8px; bottom:8px; width:2px; background:#2f6f5e; opacity:.3; }
+  .timeline li { position:relative; padding:0 0 20px 34px; }
+  .timeline li::before { content:""; position:absolute; left:2px; top:5px; width:15px; height:15px; border-radius:50%; background:#fff; border:2px solid #2f6f5e; }
+  .timeline li.done::before { background:#2f6f5e; }
+
+  /* ---- matrix table ---- */
+  table.mat { width:100%; border-collapse:collapse; font-size:14px; }
+  table.mat th { text-align:left; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:#7c7a72; font-weight:600; padding:0 10px 8px 0; border-bottom:1px solid #e9e3d6; }
+  table.mat td { padding:11px 10px 11px 0; border-bottom:1px solid #f2efe8; vertical-align:top; }
+  table.mat tr:last-child td { border-bottom:0; }
+  .tag { font-family:"JetBrains Mono", monospace; font-size:11.5px; padding:2px 7px; border-radius:6px; background:#eef3f1; color:#2f6f5e; font-weight:500; }
+  .tag.amb { background:#faf1e7; color:#c97b3f; }
+  .tag.red { background:#f7ecec; color:#b06367; }
+
+  .mermaid { display:flex; justify-content:center; }
+  .mermaid svg { max-width:100%; height:auto; }
+  .radial-1 { position:fixed; top:-140px; right:-140px; width:460px; height:460px; border-radius:50%;
+    background:radial-gradient(circle, rgba(47,111,94,.055) 0%, rgba(47,111,94,0) 70%); pointer-events:none; z-index:0; }
+  .radial-2 { position:fixed; bottom:-180px; left:-160px; width:520px; height:520px; border-radius:50%;
+    background:radial-gradient(circle, rgba(201,123,63,.05) 0%, rgba(201,123,63,0) 70%); pointer-events:none; z-index:0; }
+</style>
+</head>
+<body class="min-h-[100dvh]">
+<div class="radial-1"></div><div class="radial-2"></div>
+
+<div class="relative z-10 max-w-5xl mx-auto px-6 md:px-8 py-12 md:py-16 space-y-12">
+
+  <!-- ================= HERO ================= -->
+  <header class="space-y-5">
+    <div class="eyebrow">Research flow · NN-based Horse Racing Prediction (HKJC)</div>
+    <h1>神經網絡，究竟有冇可能<br>贏過 Benter 嘅方法？</h1>
+    <p class="text-[15.5px] max-w-2xl">
+      呢個頁面將整個研究流程由「提出問題」到「得出答案」逐步拆開。核心結論先講：
+      <strong class="text-ink">喺真實 HKJC 資料上，答案係「唔會」</strong> ——
+      而呢個結論唔係估出嚟，係框架自己跑出嚟嘅。
+    </p>
+
+    <div class="card" style="background:#fbfdfc">
+      <div class="grid md:grid-cols-3 gap-6">
+        <div>
+          <div class="eyebrow mb-1">資料</div>
+          <div class="text-2xl font-serif">6,262 場</div>
+          <div class="text-[13px] text-muted mt-1">真實 HKJC 賽事，2018–2025<br>78,156 runner rows · 4,505 匹馬</div>
+        </div>
+        <div>
+          <div class="eyebrow mb-1">結論</div>
+          <div class="text-2xl font-serif" style="color:#b06367">輸 8%</div>
+          <div class="text-[13px] text-muted mt-1">所有模型喺 log-loss 上<br>輸畀 de-vig 咗嘅市場</div>
+        </div>
+        <div>
+          <div class="eyebrow mb-1">驗證</div>
+          <div class="text-2xl font-serif" style="color:#2f6f5e">Null test</div>
+          <div class="text-[13px] text-muted mt-1">最優市場下全部輸<br>ROI −3.5% → 利潤製造唔到</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <hr class="rule">
+
+  <!-- ================= 1. THE QUESTION ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 01 — 問題定義</div>
+    <h2>問題唔係「邊匹會贏」</h2>
+
+    <p class="max-w-3xl">
+      Benter 嘅框架從來唔係一個 picks-and-shoots。佢分兩階段，兩階段都有嚴格嘅輸出要求。
+      搞清楚呢一點，之後所有實驗設計（用 log-loss 唔用 hit rate、點解要 de-vig、點解要 null test）都係自然推導出嚟。
+    </p>
+
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="card card-lift">
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 mt-0.5 flex-none" style="color:#2f6f5e" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          <div>
+            <h3>階段一 · 算出基本概率</h3>
+            <p class="text-[13.5px] mt-2">
+              用 <span class="mono text-[12.5px]">multinomial logit</span> 加 100 多個賽前因子
+              （檔位、評分、磅重、騎練勝率⋯⋯）估計每匹馬嘅勝率。
+            </p>
+            <div class="mt-3 pt-3" style="border-top:1px dashed #e9e3d6">
+              <div class="text-[12.5px] mono" style="color:#2f6f5e">P(i 贏) = exp(xᵢβ) / Σⱼ exp(xⱼβ)</div>
+              <div class="text-[12px] text-muted mt-1">同一場內加總 = 1，所以輸出本身就係概率</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card card-lift">
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 mt-0.5 flex-none" style="color:#c97b3f" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <div>
+            <h3>階段二 · 融合市場價格</h3>
+            <p class="text-[13.5px] mt-2">
+              將自己嘅概率同市場隱含概率合併，再喺「合併概率 × 賠率 &gt; 1」時落注，用分數 Kelly 配注。
+            </p>
+            <div class="mt-3 pt-3" style="border-top:1px dashed #e9e3d6">
+              <div class="text-[12.5px] mono" style="color:#c97b3f">cᵢ = softmax(α·log fᵢ + β·log πᵢ)</div>
+              <div class="text-[12px] text-muted mt-1">π = 除去抽水後嘅市場概率</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="background:#fbf9f5">
+      <div class="eyebrow mb-3">呢個框架決定咗用乜 metric 評分</div>
+      <table class="mat">
+        <thead><tr><th style="width:34%">要答嘅問題</th><th style="width:26%">用嘅指標</th><th>點解唔可以用其他</th></tr></thead>
+        <tbody>
+          <tr><td>模型準唔準？</td><td class="mono text-[12.5px]">log-loss</td><td>hit rate 獎勵運氣；log-loss 獎勵誠實</td></tr>
+          <tr><td>校準得唔得？</td><td class="mono text-[12.5px]">reliability curve</td><td>講「20% 嘅馬係咪真係贏 20%」</td></tr>
+          <tr><td>知得比市場多唔多？</td><td class="mono text-[12.5px]">R² vs 市場</td><td>log-loss 好過市場都一樣可能冇錢賺</td></tr>
+          <tr><td>值唔值得落注？</td><td class="mono text-[12.5px]">計抽水後 ROI</td><td>命中率同價值無關</td></tr>
+          <tr><td>個結果係真定假？</td><td class="mono text-[12.5px]">null test</td><td>個 backtest 如果永遠賺錢，就係壞嘅</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= 2. THE PIPELINE ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 02 — 整條流水線</div>
+    <h2>由網頁到落注決策</h2>
+    <p class="max-w-3xl">
+      每一格都係一個可獨立驗證嘅模組。留意中間嗰幾個綠色同紅色標記 —— 全部都係<strong class="text-ink">防止自己呃自己</strong>嘅關卡。
+    </p>
+
+    <div class="card overflow-x-auto">
+      <div class="mermaid">
+flowchart TB
+  subgraph SRC["① 資料來源<br/>"]
+    A1["HKJC 公開賽果頁<br/>LocalResults.aspx<br/>歷史賽事 ✓"]
+    A2["馬匹頁<br/>/horse?horseid<br/>評分 · 產地 · 性別"]
+    A3["獸醫紀錄頁<br/>/veterinaryrecord<br/>⚠ 唔按馬匹過濾 → 拒用"]
+  end
+
+  subgraph PREP["② Canonical frame<br/>+ 因果特徵"]
+    B1["每場每馬一行<br/>所有欄位帶 timestamp"]
+    B2["歷史特徵只用<br/>嚴格更早嘅日期"]
+    B3["🛡 抽水後評分<br/>只係今日知到 → 排除"]
+    B4["🛡 覆蓋率偏移<br/>train/test 唔一致 → 警報"]
+  end
+
+  subgraph MODELS["③ 模型<br/>同一特徵、同一 loss"]
+    C1["A 條件 logit<br/>McFadden + L2"]
+    C2["B LightGBM<br/>binary win + 校準 softmax"]
+    C3["C/D 類神經網絡<br/>listwise MLP<br/>field transformer"]
+  end
+
+  subgraph EVAL["④ 評估 + 落注模擬<br/>"]
+    D1["市場層 F<br/>cᵢ = softmax(α log f + β log π)"]
+    D2["log-loss · 校準曲線<br/>R² vs 市場"]
+    D3["Kelly 分注<br/>計抽水 · 落注價 · 上限"]
+  end
+
+  A1 --> B1
+  A2 --> B1
+  A3 --> B1
+  B1 --> B2 --> B3 --> B4
+  B4 --> C1 & C2 & C3
+  C1 & C2 & C3 --> D1
+  D1 --> D2 & D3
+  D2 --> E1{"Null test<br/>市場設為最優"}
+  D3 --> E1
+  E1 --> E2["全部輸 + ROI 負<br/>= 利潤製造唔到 ✓"]
+
+  classDef src fill:#f7f5f0,stroke:#e9e3d6,color:#3a4256
+  classDef prep fill:#eef3f1,stroke:#2f6f5e,color:#2f6f5e
+  classDef mod fill:#faf1e7,stroke:#c97b3f,color:#8a5527
+  classDef ev fill:#f3eef0,stroke:#b06367,color:#8a4b4e
+  classDef ok fill:#2f6f5e,stroke:#2f6f5e,color:#fff
+  class A1,A2,A3 src
+  class B1,B2,B3,B4 prep
+  class C1,C2,C3 mod
+  class D1,D2,D3 ev
+  class E2 ok
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-4">
+      <div class="card">
+        <div class="eyebrow mb-2">重跑成本</div>
+        <div class="text-[13.5px]">每個 HTML 落 disk cache，18,170 個檔、337 MB。重跑唔使再上網，重新 parse 幾分鐘搞掂。</div>
+      </div>
+      <div class="card">
+        <div class="eyebrow mb-2">節流</div>
+        <div class="text-[13.5px]">全域 rate limit（唔係 per-thread），約 3 req/s。中斷可續行。</div>
+      </div>
+      <div class="card">
+        <div class="eyebrow mb-2">Cache 層</div>
+        <div class="text-[13.5px]"><code class="mono text-[12.5px]">data/</code> 全部 gitignore —— 第三方內容唔入 repo，但本地可以隨時重建。</div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= 3. THE MATRIX ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 03 — 實驗矩陣</div>
+    <h2>A–F 六條實驗線</h2>
+    <p class="max-w-3xl">
+      關鍵在於 <strong class="text-ink">D vs E</strong> 同 <strong class="text-ink">F</strong>。
+      其餘四條都係鋪墊。
+    </p>
+
+    <div class="card">
+      <table class="mat">
+        <thead><tr><th style="width:52px">#</th><th style="width:30%">模型</th><th>呢條線測乜嘢</th><th style="width:23%">裁決標準</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="tag">A</span></td><td>條件 logit（McFadden + L2）</td>
+            <td>地板線。輸出本身就係全場加總 = 1 嘅概率</td><td class="text-[13px]">基準</td>
+          </tr>
+          <tr>
+            <td><span class="tag">B</span></td><td>LightGBM（binary win + 校準 softmax）</td>
+            <td>強樹模型 baseline</td><td class="text-[13px]">基準</td>
+          </tr>
+          <tr>
+            <td><span class="tag">C</span></td><td>Listwise MLP</td>
+            <td>深度學習到底有冇用</td><td class="text-[13px]">C 應贏 A</td>
+          </tr>
+          <tr style="background:#fbf9f5">
+            <td><span class="tag amb">D</span></td><td>MLP + 文字</td>
+            <td>文字有冇附加值</td><td class="text-[13px]"><strong>D vs E</strong> 決定值唔值得</td>
+          </tr>
+          <tr style="background:#fbf9f5">
+            <td><span class="tag amb">E</span></td><td>LightGBM + 文字</td>
+            <td>公平對照組：樹 + 文字</td><td class="text-[13px]">D 贏先好，否則用 E</td>
+          </tr>
+          <tr style="background:#fbf9f5">
+            <td><span class="tag red">F</span></td><td>A–E 最佳 + 市場賠率</td>
+            <td>究竟有冇嘢可以贏過市場</td><td class="text-[13px]">樣本外 ROI 必須穩定為正</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mt-4 pt-3 text-[13px] text-muted" style="border-top:1px dashed #e9e3d6">
+        F 揀邊個模型做基礎，<span class="mono">只用 validation split</span> 決定；test split 全程只喺最後行一次。
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= 4. LEAKAGE ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 04 — 防泄漏</div>
+    <h2>賽馬項目通常死喺呢度</h2>
+    <p class="max-w-3xl">
+      呢啲唔係「做得好啲」嘅要求，係「個結果可信唔可信」嘅要求。所以全部寫入 code，唔靠紀律。
+    </p>
+
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="card">
+        <h3 class="mb-3">四道閘</h3>
+        <ul class="space-y-3 text-[13.5px]">
+          <li class="flex gap-2.5"><span class="mono flex-none" style="color:#2f6f5e">01</span><span><strong>只用嚴格更早嘅日期</strong> —— 賽事日 d 嘅特徵只可以用 <span class="mono text-[12px]">meeting_date &lt; d</span> 嘅賽事。同一日嘅都唔用。</span></li>
+          <li class="flex gap-2.5"><span class="mono flex-none" style="color:#2f6f5e">02</span><span><strong>賽後欄位永遠唔會變成特徵</strong> —— 用 assertion 硬性把關，唔靠「記得唔好加」。</span></li>
+          <li class="flex gap-2.5"><span class="mono flex-none" style="color:#2f6f5e">03</span><span><strong>填補統計只用 training split</strong> —— 用全份 data 嘅中位數，會令每個特徵依賴全份資料。</span></li>
+          <li class="flex gap-2.5"><span class="mono flex-none" style="color:#2f6f5e">04</span><span><strong>覆蓋率偏移警報</strong> —— 特徵喺 train/test 出現率差太遠 → 報警。</span></li>
+        </ul>
+      </div>
+
+      <div class="card" style="background:#fdf8f8;border-color:#e8d3d4">
+        <div class="eyebrow mb-2" style="color:#b06367">真實捉到嘅一個 leakage</div>
+        <h3 class="mb-2" style="color:#8a4b4e">「年齡」欄位其實係未來數值</h3>
+        <p class="text-[13.5px]">
+          HKJC 喺馬匹頁公佈嘅係<span class="mono text-[12px]">收集當日</span>嘅年齡。
+          所以一場 2018 年嘅賽事，呢欄裝住馬匹 <strong>2026 年</strong>嘅年齡。
+        </p>
+        <div class="mt-3 pt-3" style="border-top:1px dashed #e8d3d4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <div class="text-[11px] uppercase tracking-wider text-muted">包含原始 age</div>
+              <div class="mono text-[15px]" style="color:#b06367">2.4996</div>
+              <div class="text-[11.5px] text-muted">ECE 0.0244</div>
+            </div>
+            <div>
+              <div class="text-[11px] uppercase tracking-wider text-muted">改用 age_at_race</div>
+              <div class="mono text-[15px]" style="color:#2f6f5e">2.3009</div>
+              <div class="text-[11.5px] text-muted">ECE 0.0092</div>
+            </div>
+          </div>
+          <div class="text-[12.5px] text-muted mt-3">conditional logit 嘅 test log-loss。</div>
+        </div>
+        <div class="mt-3 text-[12.5px]" style="color:#8a4b4e">
+          呢個唔係肉眼睇得出，係 ablation 捉到 —— 已經食咗 0.20 nats。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= 5. NULL TEST ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 05 — Null test</div>
+    <h2>整個項目最關鍵的一個檢查</h2>
+    <p class="max-w-3xl">
+      模擬器嘅市場係可以調嘅，可以調到<span class="text-ink font-semibold">最優</span> ——
+      市場知晒所有嘢，冇嘢可以賺。呢個情況下如果仲顯示正數 ROI，
+      代表個框架<span class="text-ink font-semibold">製造緊利潤</span>，其他所有數字都冇意義。
+    </p>
+
+    <div class="card">
+      <div class="grid md:grid-cols-2 gap-6">
+        <div>
+          <div class="eyebrow mb-3">最優市場下嘅結果</div>
+          <div class="space-y-2.5">
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-[13.5px]">所有模型 R² vs 市場</span>
+              <span class="mono text-[13px]" style="color:#b06367">−0.085 … −0.112</span>
+            </div>
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-[13.5px]">Blend F R²</span>
+              <span class="mono text-[13px]" style="color:#b06367">+0.001</span>
+            </div>
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-[13.5px]">投注 ROI（staked capital）</span>
+              <span class="mono text-[13px]" style="color:#b06367">−3.5%</span>
+            </div>
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-[13.5px]">ev_ratio（實現 ÷ 預期）</span>
+              <span class="mono text-[13px]" style="color:#b06367">−0.27</span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="eyebrow mb-3">市場唔效率 → ROI 點變</div>
+          <div class="space-y-3">
+            <div>
+              <div class="flex justify-between text-[12.5px] mb-1"><span class="mono">market_noise = 0</span><span class="mono" style="color:#b06367">−3.5%</span></div>
+              <div class="gaptrack" style="height:12px"><div class="gapzero" style="left:50%"></div><div class="gapfill worse" style="left:46%;width:4%"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-[12.5px] mb-1"><span class="mono">market_noise = 0.55</span><span class="mono" style="color:#2f6f5e">+79%</span></div>
+              <div class="gaptrack" style="height:12px"><div class="gapzero" style="left:50%"></div><div class="gapfill better" style="left:50%;width:30%"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-[12.5px] mb-1"><span class="mono">market_noise = 0.75</span><span class="mono" style="color:#2f6f5e">+126%</span></div>
+              <div class="gaptrack" style="height:12px"><div class="gapzero" style="left:50%"></div><div class="gapfill better" style="left:50%;width:48%"></div></div>
+            </div>
+          </div>
+          <div class="text-[12.5px] text-muted mt-3">
+            豎線 = 零（無 edge）。每個 ROI 都係一個旋鈕值，唔係一個發現。關鍵係 <span class="mono">0</span> 嗰行：
+            市場冇嘢可瞞嘅時候，ROI 成欄 collapse 成負數。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= 6. RESULTS ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 06 — 真實資料結果</div>
+    <h2>所有模型都輸畀市場</h2>
+    <p class="max-w-3xl">
+      6,262 場真實 HKJC 賽事，train ≤ 2022 / val 2023 / test 2024–2025。
+      下圖係每個模型同市場嘅差距（以 race log-loss 計，0 = 市場）。<strong class="text-ink">向右 = 差過市場</strong>。
+    </p>
+
+    <div class="card">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h3>同市場嘅差距（nats／場）</h3>
+        <div class="text-[12px] text-muted">← 贏過市場 ｜ 輸過市場 →</div>
+      </div>
+
+      <div class="space-y-0.5">
+        <div class="gaprow">
+          <span class="text-[13px] font-medium" style="color:#2f6f5e">市場本身</span>
+          <div class="gaptrack"><div class="gapzero" style="left:22%"></div></div>
+          <span class="gapval" style="color:#2f6f5e">基準</span>
+        </div>
+        <div class="gaprow">
+          <span class="text-[13px] mono">A logit</span>
+          <div class="gaptrack"><div class="gapzero" style="left:22%"></div><div class="gapfill worse" style="left:22%;width:74%"></div></div>
+          <span class="gapval" style="color:#b06367">+0.173</span>
+        </div>
+        <div class="gaprow">
+          <span class="text-[13px] mono">B LightGBM</span>
+          <div class="gaptrack"><div class="gapzero" style="left:22%"></div><div class="gapfill worse" style="left:22%;width:69%"></div></div>
+          <span class="gapval" style="color:#b06367">+0.162</span>
+        </div>
+        <div class="gaprow">
+          <span class="text-[13px] mono">C/D 類神經網絡</span>
+          <div class="gaptrack"><div class="gapzero" style="left:22%"></div><div class="gapfill worse" style="left:22%;width:70%"></div></div>
+          <span class="gapval" style="color:#b06367">+0.164</span>
+        </div>
+        <div class="gaprow">
+          <span class="text-[13px] mono">E LGBM + 文字</span>
+          <div class="gaptrack"><div class="gapzero" style="left:22%"></div><div class="gapfill worse" style="left:22%;width:69%"></div></div>
+          <span class="gapval" style="color:#b06367">+0.162</span>
+        </div>
+        <div class="gaprow">
+          <span class="text-[13px] mono">F blend</span>
+          <div class="gaptrack"><div class="gapzero" style="left:22%"></div><div class="gapfill better" style="left:18%;width:4%"></div></div>
+          <span class="gapval" style="color:#2f6f5e">−0.010</span>
+        </div>
+      </div>
+
+      <div class="mt-4 pt-3 text-[12.5px] text-muted" style="border-top:1px dashed #e9e3d6">
+        市場 race log-loss = 2.1281 ｜ 測試集 19,804 rows / 1,586 場 ｜ 抽水中位數 <span class="mono">22.7%</span>
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-5">
+      <div class="card card-lift">
+        <div class="eyebrow mb-2">結論一</div>
+        <h3 class="mb-2">市場贏，而且贏得好遠</h3>
+        <p class="text-[13.5px]">所有 standalone model 輸市場約 8%。而 de-vig 咗嘅市場校準得好難得：最低概率桶預測 4.9%、實際贏 4.6%；最高桶預測 26%、實際 27.5%。</p>
+        <p class="text-[13px] mt-2" style="color:#2f6f5e">基準係公平嘅，所以差距係真嘅。</p>
+      </div>
+      <div class="card card-lift">
+        <div class="eyebrow mb-2">結論二</div>
+        <h3 class="mb-2">NN 改變唔到分數</h3>
+        <p class="text-[13.5px]">C (2.2921) 同 A (2.3009) 喺同一個水平。Listwise MLP、field transformer、conditional logit、LightGBM 全部企埋一齊。</p>
+        <p class="text-[13px] mt-2" style="color:#2f6f5e">唯一分別：NN 校準最好（ECE 0.0029 vs 0.0036 vs 0.0092），hit rate 亦最高（0.219）。</p>
+      </div>
+      <div class="card card-lift">
+        <div class="eyebrow mb-2">結論三</div>
+        <h3 class="mb-2">融合層學識咗「信市場」</h3>
+        <p class="text-[13.5px]">MLE 自己學到 <span class="mono">α = 0.36</span>（模型）同 <span class="mono">β = 0.88</span>（市場）—— 佢自己發現市場值得大部分權重。</p>
+        <p class="text-[13px] mt-2" style="color:#2f6f5e">F 只贏市場 +0.45%。Benter 第二層冇壞，係冇嘢可以 fuse。</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= 7. SYNTHETIC vs REAL ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 07 — 兩個世界對照</div>
+    <h2>模擬器話「贏」，真實資料話「輸」</h2>
+    <p class="max-w-3xl">
+      同一套 code、同一個 matrix、同一個評分方式。唯一分別係資料來源。
+      模擬器有一個真實資料冇嘅文字通道（賽前評語），亦冇真實市場嗰種資訊不對稱。
+    </p>
+
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="card">
+        <div class="flex items-baseline justify-between mb-3">
+          <h3>模擬器</h3>
+          <span class="tag">market_noise = 0.55</span>
+        </div>
+        <table class="mat">
+          <tbody>
+            <tr><td class="mono text-[12.5px]">D  NN + 文字</td><td class="text-right mono text-[12.5px]" style="color:#2f6f5e">+0.0295</td><td class="text-right text-[12px] text-muted">贏過 E</td></tr>
+            <tr><td class="mono text-[12.5px]">E  LGBM + 文字</td><td class="text-right mono text-[12.5px]">+0.0267</td><td class="text-right text-[12px] text-muted">輸少啲</td></tr>
+            <tr><td class="mono text-[12.5px]">C  NN</td><td class="text-right mono text-[12.5px]">+0.0158</td><td class="text-right text-[12px] text-muted">贏過 B</td></tr>
+            <tr><td class="mono text-[12.5px]">B  LightGBM</td><td class="text-right mono text-[12.5px]">+0.0053</td><td class="text-right text-[12px] text-muted">最弱</td></tr>
+            <tr style="border-top:1px solid #e9e3d6"><td class="mono text-[12.5px]">投注 ROI</td><td class="text-right mono text-[12.5px]" style="color:#2f6f5e">+79.0%</td><td class="text-right text-[12px] text-muted">ev 1.09</td></tr>
+          </tbody>
+        </table>
+        <div class="text-[12.5px] text-muted mt-3">R² vs 市場。模擬器上 <strong>NN 贏</strong>，而且校準最好。</div>
+      </div>
+
+      <div class="card" style="background:#fdf8f8;border-color:#e8d3d4">
+        <div class="flex items-baseline justify-between mb-3">
+          <h3>真實 HKJC</h3>
+          <span class="tag red">6,262 場</span>
+        </div>
+        <table class="mat">
+          <tbody>
+            <tr><td class="mono text-[12.5px]">D  NN + 文字</td><td class="text-right mono text-[12.5px]" style="color:#b06367">−0.0771</td><td class="text-right text-[12px] text-muted">輸過 E</td></tr>
+            <tr><td class="mono text-[12.5px]">E  LGBM + 文字</td><td class="text-right mono text-[12.5px]" style="color:#b06367">−0.0760</td><td class="text-right text-[12px] text-muted">輸少少</td></tr>
+            <tr><td class="mono text-[12.5px]">C  NN</td><td class="text-right mono text-[12.5px]" style="color:#b06367">−0.0771</td><td class="text-right text-[12px] text-muted">同 A 一樣</td></tr>
+            <tr><td class="mono text-[12.5px]">B  LightGBM</td><td class="text-right mono text-[12.5px]" style="color:#b06367">−0.0760</td><td class="text-right text-[12px] text-muted">幾乎最好</td></tr>
+            <tr style="border-top:1px solid #e8d3d4"><td class="mono text-[12.5px]">投注 ROI</td><td class="text-right mono text-[12.5px]" style="color:#b06367">−38.8%</td><td class="text-right text-[12px] text-muted">ev −0.25</td></tr>
+          </tbody>
+        </table>
+        <div class="text-[12.5px] mt-3" style="color:#8a4b4e">R² vs 市場。真實資料上 <strong>NN 冇贏過 logit</strong>，唯一優勢仍然係校準。</div>
+      </div>
+    </div>
+
+    <div class="card" style="background:#fbf9f5">
+      <div class="text-[13.5px]">
+        <strong class="text-ink">兩個答案唔同，正正就係要起兩個嘅理由。</strong>
+        模擬器證明個實驗設計同評分方法係啱嘅；真實資料證明個結論。而如果淨係得一個，你唔知邊個係真。
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= 8. COVERAGE ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 08 — Feature 覆蓋審計</div>
+    <h2>你份 feature list，齊咗幾多？</h2>
+    <p class="max-w-3xl">
+      27 項齊、1 項部分、6 項 HKJC 根本冇公開。呢 6 項就係真正 edge 可能存在嘅地方。
+    </p>
+
+    <div class="card">
+      <div class="stacked mb-4">
+        <div style="width:79.4%;background:#2f6f5e">27 齊</div>
+        <div style="width:2.9%;background:#c97b3f"></div>
+        <div style="width:17.7%;background:#b06367">6 攞唔到</div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-6">
+        <div>
+          <div class="eyebrow mb-2" style="color:#2f6f5e">已覆蓋</div>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>場地</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>途程</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>班次</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>場地狀況</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>馬匹數目</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>檔位</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>評分</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>評分變化</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>體重 + 變化</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>距上次出賽</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>近 N 場名次</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>分段時間*</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>距離適應度</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>場地適應度</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>騎師勝率</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>練馬師勝率</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>騎練組合</span>
+            <span class="chip"><span class="dot" style="background:#2f6f5e"></span>賠率 (SP)</span>
+          </div>
+          <div class="text-[12px] text-muted mt-2">* 冇公開逐馬分段時間 → 用馬匹自己近 5 場每秒每米完場時間代替（93.9%）</div>
+        </div>
+
+        <div>
+          <div class="eyebrow mb-2" style="color:#c97b3f">部分覆蓋</div>
+          <div class="flex flex-wrap gap-1.5 mb-4">
+            <span class="chip"><span class="dot" style="background:#c97b3f"></span>年齡 — 10.2%（test window 35.7%、2025 年 48.7%）</span>
+          </div>
+
+          <div class="eyebrow mb-2" style="color:#b06367">攞唔到</div>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="chip"><span class="dot" style="background:#b06367"></span>開盤賠率</span>
+            <span class="chip"><span class="dot" style="background:#b06367"></span>賠率走勢</span>
+            <span class="chip"><span class="dot" style="background:#b06367"></span>晨操評語</span>
+            <span class="chip"><span class="dot" style="background:#b06367"></span>馬評</span>
+            <span class="chip"><span class="dot" style="background:#b06367"></span>獸醫報告</span>
+            <span class="chip"><span class="dot" style="background:#b06367"></span>傷患紀錄</span>
+          </div>
+          <div class="text-[12px] mt-2" style="color:#8a4b4e">
+            獸醫／傷患：endpoint <span class="mono">唔按馬匹過濾</span>，每匹馬都係同一份名單 → collector 偵測到就拒用。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ================= 9. ROADMAP ================= -->
+  <section class="space-y-6">
+    <div class="eyebrow">Step 09 — 結論同下一步</div>
+    <h2>缺嘅唔係模型，係資訊</h2>
+
+    <div class="card" style="background:#fbf9f5">
+      <div class="text-[15px] leading-relaxed">
+        > <strong class="text-ink">答案：唔會。</strong>
+        喺真實 HKJC 公開資料上建立嘅基本面模型，冇一個贏得過市場；類神經網絡亦冇。
+        呢個結論係框架自己跑出嚟嘅 —— null test 之下利潤製造唔到。
+      </div>
+      <div class="text-[13.5px] mt-3 pt-3" style="border-top:1px dashed #e9e3d6">
+        呢個係有用嘅結果。如果當初用一個有 leakage 嘅 backtest，你會得到相反嘅結論，然後輸錢。
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="card">
+        <h3 class="mb-3">下一步：加資訊</h3>
+        <p class="text-[13.5px] mb-3">上面嗰 6 項 HKJC 唔公開嘅特徵，就係 edge 真正可能存在嘅地方：</p>
+        <div class="flex flex-wrap gap-1.5">
+          <span class="chip" style="border-color:#2f6f5e;color:#2f6f5e">賠率走勢</span>
+          <span class="chip" style="border-color:#2f6f5e;color:#2f6f5e">Order book</span>
+          <span class="chip" style="border-color:#2f6f5e;color:#2f6f5e">Trackwork</span>
+          <span class="chip" style="border-color:#2f6f5e;color:#2f6f5e">獸醫紀錄</span>
+        </div>
+        <div class="text-[13px] text-muted mt-3">
+          冇咗賠率走勢，模型就係用<b>比市場更少</b>嘅資訊去挑戰市場。
+        </div>
+      </div>
+      <div class="card">
+        <h3 class="mb-3">或者：換一個市場</h3>
+        <p class="text-[13.5px]">
+          專業資金較少、公開資訊失效更快嘅市場。框架唔會變，只係換個 source。
+        </p>
+        <div class="text-[13px] text-muted mt-3">
+          <span class="mono">hkjc-nn run --data other.csv</span> — 後面嘅流程一樣。
+        </div>
+      </div>
+    </div>
+
+    <ol class="timeline mt-6">
+      <li class="done">
+        <strong class="text-[14px]">Stage 1 · 資料</strong>
+        <p class="text-[13px] text-muted">6,262 場、78,156 runner rows、2018–2025、每個欄位帶 timestamp ✓</p>
+      </li>
+      <li class="done">
+        <strong class="text-[14px]">Stage 2 · Baseline</strong>
+        <p class="text-[13px] text-muted">A 同 B 嘅 log-loss 同 reliability curve：兩個都輸市場約 8% ✓</p>
+      </li>
+      <li class="done">
+        <strong class="text-[14px]">Stage 3 · 類神經網絡</strong>
+        <p class="text-[13px] text-muted">C/D/E 對照：NN 喺分數上同 logit 無異，只係校準更好 ✓</p>
+      </li>
+      <li class="done">
+        <strong class="text-[14px]">Stage 4 · 市場 + 模擬</strong>
+        <p class="text-[13px] text-muted">F 比市場高 +0.45%；落注輸 39% ✓</p>
+      </li>
+      <li>
+        <strong class="text-[14px]">Stage 5 · 紙上交易 <span class="text-[12px] font-normal text-muted">← 真正下一步</span></strong>
+        <p class="text-[13px] text-muted">一個賽季，即時預測唔落真錢。呢步唔係 optional —— 過到單一 split 仍然可能好脆。</p>
+      </li>
+      <li>
+        <strong class="text-[14px]">Stage 6 · 補缺失資訊</strong>
+        <p class="text-[13px] text-muted">賠率走勢、order book、trackwork、獸醫紀錄。加 feature → 重跑 → 睇 R² 有冇郁。</p>
+      </li>
+    </ol>
+  </section>
+
+  <hr class="rule">
+
+  <footer class="flex flex-wrap items-center justify-between gap-4 pt-2 pb-8">
+    <div class="text-[12.5px] text-muted">
+      所有數字都可以用 <span class="mono">hkjc-nn run</span> 重新產生。77 個 test，null test 鎖住框架。
+    </div>
+    <div class="text-[12.5px] text-muted mono">
+      hkjc-nn collect · coverage · run
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      fontFamily: 'Outfit, sans-serif',
+      fontSize: '13px',
+      primaryColor: '#f7f5f0',
+      primaryTextColor: '#3a4256',
+      primaryBorderColor: '#e9e3d6',
+      lineColor: '#b9b3a6',
+      secondaryColor: '#eef3f1',
+      tertiaryColor: '#faf1e7',
+      clusterBkg: '#fbf9f5',
+      clusterBorder: '#e9e3d6'
+    },
+    flowchart: { curve: 'basis', nodeSpacing: 34, rankSpacing: 44, padding: 12 }
+  });
+</script>
+</body>
+</html>

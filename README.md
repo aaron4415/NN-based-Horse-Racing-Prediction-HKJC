@@ -663,16 +663,42 @@ summary: covered=27, unavailable=6, partial=1
 | 市場 | 賠率走勢 / odds movement | **N/A** | — |
 
 **Six features cannot be had from HKJC's public pages.** They are not
-engineering failures; the information simply is not published:
+engineering failures; the information simply is not published, or not
+published in a form that can be reached for a past meeting.
 
 | Missing | Why |
 |---|---|
 | 開盤賠率 / opening odds | HKJC publishes only the final price for a past race |
 | **賠率走勢 / odds movement** | the same — and this is the single most important gap, because odds movement is where a sharp bettor's information actually lives |
 | 晨操評語 / trackwork notes | trackwork is published for the current meeting only, with no history |
-| 馬評 / pre-race preview | never published as raw text |
+| 馬評 / pre-race preview | **馬評是有的** — HKJC calls it 「賽績簡評」 and publishes it inside each meeting's **Form Guide PDF**. But the PDF is only archived with a derivable name for the special meetings (HKIR, Champions Day) at `corporate.hkjc.com/image/YYYYMM/YYYYMMDD_*.pdf`; ordinary meetings have no derivable URL, and the `formguide/{n}.html` index is a JS shell that only resolves the current meeting. |
 | 獸醫報告 / veterinary record | the endpoint **ignores the horse id** — every horse returns the same population-level list of nine events, so the notes cannot be attributed to a runner. The collector detects this and refuses to use them rather than smuggling a date signal in under the name of an injury record. |
 | 傷患 / injury | the same |
+
+### Why the racecard cannot be back-filled
+
+The obvious way to get 馬評, a rating change, an age and a country for an
+old race would be the racecard — and HKJC *does* have one, per meeting. It
+just cannot be asked for a date in the past:
+
+| Endpoint | Behaviour |
+|---|---|
+| `RaceCard.aspx?bcode=&date=20240106` | returns **byte-identical** output to `?date=20261014` (195 359 bytes, same 11 horse ids) — the date is ignored and the current meeting is always shown |
+| `racecard.aspx?para=/20191006/S1/1` | the overseas variant, which *looks* date-aware, also ignores it: 2018, 2019 and 2024 all return the same 34 030 bytes |
+| `racing/speedpro/english/formguide/{n}.html` | the Form Guide index resolves `n=1` (the current meeting) and returns 404 for `n=20` and above — no history |
+| `veterinaryrecord?horseid=` and `overecord?horseid=` | both return the **same nine events** for every horse, so the notes are population-level, not per-horse |
+
+This is the general shape of the problem: HKJC's HTML endpoints are built
+around *today's* meeting, and the archives that do exist are PDFs behind
+non-derivable URLs. The results pages are the exception — `LocalResults.aspx`
+does honour `RaceDate`, which is why the historical dataset could be
+collected at all.
+
+**If 馬評 matters, it is a data purchase, not a scrape.** A licensed
+provider that parses the Form Guide per meeting (Renavon, Apify-hosted
+scrapers) turns this from an impossible problem into a parser problem. The
+same providers usually carry **odds movement**, which is the gap that
+actually costs you the edge.
 
 **Age is only partial.** HKJC publishes `Country of Origin / Age: NZ / 5` for
 horses imported from 2019 onwards and a bare `Country of Origin: GER` for
