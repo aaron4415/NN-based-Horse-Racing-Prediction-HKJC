@@ -33,6 +33,15 @@ The point is not to build a pretty model. The point is to answer the question
 
 ---
 
+## Visual walkthrough
+
+`docs/research-flow.html` is a self-contained page that walks through the whole
+research flow — the question, the pipeline, the A–F matrix, the leakage
+guards, the null test, the results on real data, and the feature-coverage
+audit. Open it in a browser; it needs no server.
+
+---
+
 ## The research question, stated properly
 
 Benter's framework is not "pick the winner". It is:
