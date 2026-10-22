@@ -2,34 +2,93 @@
 
 **Does a neural network beat Benter's approach on Hong Kong horse racing?**
 
-This repository is the experimental harness for that question. It implements the
-Benter pipeline faithfully — a conditional logit over pre-race fundamentals,
-fused with the market's own implied probabilities — and then puts a family of
-neural networks on the same footing: the same features, the same time-based
-split, the same loss, the same evaluation, the same betting simulation.
+**On 6 262 real HKJC races (2018–2025): no — and the harness proves it rather
+than assuming it.**
 
-The point is not to build a pretty model. The point is to answer the question
-*honestly*, and to make it possible to answer it even when the answer is
-"no".
+Every model built on public pre-race fundamentals — a conditional logit,
+LightGBM, a listwise MLP, a field-attention transformer — is about **8% worse
+in log-loss than the de-vigged market**. The neural network is not more
+accurate than the conditional logit; it is only better *calibrated*. The
+Benter fusion learns by itself to put **88% of its weight on the market**, beats
+it by **+0.45%**, and betting it **loses 39%** after the takeout.
 
-> **The answer, on 6 262 real HKJC races (2018–2025): no.**
->
-> Every model built on public pre-race fundamentals — conditional logit,
-> LightGBM, and the neural networks — is about **8% worse in log-loss than
-> the de-vigged market**. The neural network is not better than the logit;
-> it is only better *calibrated*. The Benter fusion learns by itself to put
-> **88% of its weight on the market** and beats the market by **+0.45%**,
-> and betting it **loses 39%** after the takeout.
->
-> The harness proves it rather than assuming it: with an optimal market
-> configured (the **null test**) every model loses and the simulation shows
-> a negative ROI. A project run with a leaky backtest would have told you
-> the opposite — and would have cost you money.
->
-> What is missing is not model capacity. It is **information**: odds
-> movement, the order book, trackwork, veterinary records. HKJC does not
-> publish those for past races, and the [feature coverage
-> audit](#feature-coverage--is-it-complete) says exactly which ones and why.
+This is the *useful* result. A project run with a leaky backtest would have
+told you the opposite — and would have cost you money. The **null test** is
+what makes it trustworthy: configure the market as optimal, and every model
+loses and the simulation shows a negative ROI. Profit cannot be manufactured.
+
+What is missing is not model capacity. It is **information** — odds movement,
+the order book, trackwork, veterinary records — and HKJC does not publish
+those for past races. The [feature coverage
+audit](#feature-coverage--is-it-complete) says exactly which ones, and why.
+
+<p align="center">
+  <img src="figures/results-vs-market.png" alt="Race log-loss: every model against the market" width="860">
+</p>
+
+<p align="center">
+  <img src="figures/equity-real.png" alt="Kelly bankroll on real races" width="860">
+</p>
+
+## TL;DR
+
+Test split: 2024–2025, 19 804 runner rows over 1 586 races. `R²` is the
+proportional reduction in race log-loss against the de-vigged market.
+
+| # | Model | race log-loss | R² vs market | ECE | hit rate |
+|---|---|---|---|---|---|
+| — | **the market** | **2.1281** | — | — | — |
+| A | conditional logit | 2.3009 | −0.0812 | 0.0092 | 0.203 |
+| B | LightGBM | 2.2899 | −0.0760 | 0.0036 | 0.210 |
+| C | listwise MLP | 2.2921 | −0.0771 | **0.0029** | **0.219** |
+| D | MLP + text | 2.2921 | −0.0771 | 0.0029 | 0.219 |
+| E | LightGBM + text | 2.2899 | −0.0760 | 0.0036 | 0.210 |
+| F | Benter blend (C + market) | **2.1185** | **+0.0045** | 0.0045 | 0.297 |
+
+Betting F with fractional Kelly after the takeout: **ROI −38.8%**, 2 113 bets,
+max drawdown 96%, `ev_ratio` −0.251. Annual: 2024 −42.5%, 2025 −19.3%.
+
+Read that table twice. The neural network is *not* better at this. And a model
+can have the **best hit rate** (C/D, 0.219) and still be a bad bet — which is
+why log-loss against the market, not the win rate, is the number that decides
+the question.
+
+## Quick start
+
+Two minutes, no data collection, no network:
+
+```powershell
+git clone https://github.com/aaron4415/NN-based-Horse-Racing-Prediction-HKJC.git
+cd NN-based-Horse-Racing-Prediction-HKJC
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[dev,torch]"
+
+# 2 500 simulated races, the full A–F matrix, figures, and a metrics table
+.\.venv\Scripts\hkjc-nn run --synthetic --races 2500 --plot-dir figures --metrics-out metrics.csv
+```
+
+That prints the whole experiment and writes `figures/calibration.png`,
+`figures/equity.png` and `figures/yearly_roi.png`.
+
+On the real data — about 40 minutes, cached on disk, and resumable:
+
+```powershell
+.\.venv\Scripts\hkjc-nn collect --start 2018-01-01 --end 2025-12-31 --target-races 7000 `
+                                --out data\hkjc_races.csv --delay 0.2 --workers 10
+.\.venv\Scripts\hkjc-nn run --data data\hkjc_races.csv --train-until 2022-12-31 --val-until 2023-12-31
+.\.venv\Scripts\hkjc-nn coverage --data data\hkjc_races.csv     # what the data actually covers
+```
+
+The tests run in under a minute and need no network — including the
+**null-market test**, which is the one that matters:
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
+```
+
+`hkjc-nn make-data --out data/synthetic.csv` writes a canonical dataset you can
+inspect; `hkjc-nn describe path/to.csv` tells you which canonical columns a
+real extract can populate, and which ones it cannot.
 
 ---
 
@@ -120,32 +179,6 @@ src/hkjc_nn/
   experiments.py          the A–F runner
   cli.py                  `hkjc-nn make-data | run | collect | coverage | describe`
 ```
-
----
-
-## Quick start
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[dev,torch]"
-
-# Collect real HKJC races (6 000+ races, ~40 min, cached on disk)
-.\.venv\Scripts\hkjc-nn collect --start 2018-01-01 --end 2025-12-31 --target-races 7000 `
-                                --out data\hkjc_races.csv --delay 0.2 --workers 10
-
-# Run the whole matrix on them
-.\.venv\Scripts\hkjc-nn run --data data\hkjc_races.csv --train-until 2022-12-31 --val-until 2023-12-31
-
-# Or run the whole matrix on simulated data (no files needed)
-.\.venv\Scripts\hkjc-nn run --synthetic --races 2500 --metrics-out metrics.csv --plot-dir figures
-
-# Audit which features the specification actually covers
-.\.venv\Scripts\hkjc-nn coverage --data data\hkjc_races.csv
-```
-
-`hkjc-nn make-data --out data/synthetic.csv` writes a canonical dataset you can
-inspect; `hkjc-nn describe path/to.csv` tells you which canonical columns a
-real extract can populate, and which ones it cannot.
 
 ---
 
@@ -318,7 +351,9 @@ hkjc-nn run --synthetic --market-noise 0.55
 
 ## Figures
 
-Generated by `hkjc-nn run --synthetic --plot-dir figures`.
+The charts at the top of this page, and the yearly ROI above, come from the
+**real** dataset. The three below are generated by
+`hkjc-nn run --synthetic --plot-dir figures`.
 
 **Reliability curves** — every model against the de-vigged market. The models
 sit above the market through the middle of the range, which is where the
@@ -492,15 +527,13 @@ takeout baked into the odds):
 | Profit factor | 1.91 |
 | Yearly ROI | 2024: +77.7%, 2025: +79.0% |
 
-`ev_ratio = 1.087` is the number that matters. The realised profit slightly
-*exceeds* what the model's own probabilities promised, which means the edge
-is in the probabilities rather than in luck. The per-bucket calibration table
-shows the claimed probability tracking the realised win rate closely (8.2%
-claimed vs 8.4% actual, 18.8% vs 20.5%).
-exactly matches what the model's own probabilities promised, which means the
-edge is in the probabilities rather than in luck. The per-bucket calibration
-table shows the claimed probability tracking the realised win rate closely
-(3.4% claimed vs 3.3% actual, 17.4% vs 17.2%, and so on).
+`ev_ratio = 1.087` is the number that matters. The realised profit *exceeds*
+what the model's own probabilities promised by about 9%, and the per-bucket
+calibration table shows the claimed probability tracking the realised win rate
+closely (8.2% claimed vs 8.4% actual, 18.8% vs 20.5%). The model's own numbers
+said the bets were worth making, and they were — which is what a working
+probability model looks like. The real-data run below points the other way, and
+that is the finding.
 
 **None of this is a forecast of real HK racing.** The ROI is a consequence of
 `market_noise=0.55` — the knob that decides how wrong the simulated market
@@ -611,7 +644,7 @@ single most important caveat on the real-data results.
 * Only public pages are read. Nothing requires authentication, and nothing
   behind a login is touched.
 
-### Compliance
+### Collecting responsibly
 
 This reads HKJC's **public** racing-information pages. Their terms generally
 prohibit unauthorised reproduction of their proprietary content, and the
@@ -765,6 +798,10 @@ max drawdown 96%, average odds 24.6, 2 113 bets. Annual: 2024 −42.5%,
 2025 −19.3%. It does not improve with an odds haircut; the edge is not hiding
 in the price.
 
+<p align="center">
+  <img src="figures/yearly-roi-real.png" alt="ROI by year on real races" width="620">
+</p>
+
 ### What this actually says
 
 **1. The market wins, and it is not close.** Every standalone model is about
@@ -799,8 +836,9 @@ it to fuse in.
 where the blended probability beats the price. On real data that means betting
 the model's biggest disagreements with the market — and the market is right far
 more often than the model is. The bet-calibration table shows it plainly: the
-model claims a 4.1% chance on the longshots it likes and they win 2.2% of the
-time.
+model claims a 6.4% chance on the longshots it likes — the ones priced around
+31-odds — and they win 3.1% of the time. Every price bucket claims more than it
+realises, and the gap is widest exactly where the stakes are.
 
 ### The honest conclusion
 
@@ -925,6 +963,25 @@ you find out the expensive way.
 
 ---
 
+## Star history
+
+If this was useful — or if you want to come back to it when the odds-movement
+data finally turns up — a star is the easiest way to say so, and it helps
+other people find it.
+
+<p align="center">
+  <a href="https://api.star-history.com/svg?repos=aaron4415/NN-based-Horse-Racing-Prediction-HKJC&type=Date">
+    <img src="https://api.star-history.com/svg?repos=aaron4415/NN-based-Horse-Racing-Prediction-HKJC&type=Date" alt="Star History" width="600">
+  </a>
+</p>
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+ground rules and a list of good first issues. The short version: keep the
+leakage guards intact, keep the null test green, and report numbers rather
+than adjectives.
+
 ## License
 
-MIT.
+[MIT](LICENSE) © 2026 Cheung King Laam

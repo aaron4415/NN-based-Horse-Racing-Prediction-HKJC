@@ -33,6 +33,13 @@ def _pyplot():
     return plt
 
 
+def _percent_formatter(decimals: int = 0):
+    """Axis formatter that renders a 0..1 fraction as a percentage."""
+    from matplotlib.ticker import FuncFormatter
+
+    return FuncFormatter(lambda v, _pos: f"{v * 100:.{decimals}f}%")
+
+
 def plot_calibration(
     tables: dict[str, pd.DataFrame],
     path: str | Path,
@@ -119,6 +126,77 @@ def plot_calibration(
     return path
 
 
+def plot_model_comparison(
+    metrics: "pd.DataFrame",
+    path: str | Path,
+    *,
+    split: str = "test",
+    title: str = "Race log-loss: every model against the market",
+) -> Path:
+    """Bar chart of each model's race log-loss with the market as a reference line.
+
+    Lower is better.  The market is drawn as a vertical line, so the reader
+    sees at a glance which models clear it and which do not — which is the
+    entire finding of the project.
+    """
+    plt = _pyplot()
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows = metrics[metrics["split"] == split].copy()
+    if rows.empty:
+        raise ValueError(f"no rows for split {split!r}")
+
+    market = rows["vs_market_ll_market"].iloc[0]
+    ordered = rows.sort_values("race_log_loss", ascending=False)
+
+    labels = {
+        "A": "A  conditional logit",
+        "B": "B  LightGBM",
+        "C": "C  listwise MLP",
+        "D": "D  MLP + text",
+        "E": "E  LightGBM + text",
+        "F": "F  blend + market",
+    }
+
+    fig, ax = plt.subplots(figsize=(9.6, 4.6))
+    ys = range(len(ordered))
+    label_x = ordered["race_log_loss"].max() + 0.012
+    for y, (_, r) in zip(ys, ordered.iterrows()):
+        code = r["model"]
+        better = r["race_log_loss"] < market
+        colour = "#2f6f5e" if better else "#b06367"
+        ax.barh(y, r["race_log_loss"], color=colour, alpha=.88, height=.62, zorder=3)
+        ax.text(
+            label_x,
+            y,
+            f"{r['race_log_loss']:.4f}    R² {r['vs_market_r2']:+.4f}",
+            va="center",
+            fontsize=10,
+            color="#3a4256",
+            fontfamily="monospace",
+        )
+
+    ax.axvline(market, color="#14171e", ls="--", lw=1.4, zorder=4)
+
+    ax.set_yticks(list(ys))
+    ax.set_yticklabels([labels.get(m, m) for m in ordered["model"]], fontsize=10.5)
+    ax.set_xlabel(
+        f"race log-loss  (lower is better)   ·   dashed line = the market, {market:.4f}"
+    )
+    ax.set_xlim(min(market, ordered["race_log_loss"].min()) - 0.02, label_x + 0.13)
+    ax.set_ylim(-0.7, len(ordered) - 0.3)
+    ax.set_title(title, fontsize=13, color="#14171e", pad=14)
+    ax.grid(axis="x", color=(0, 0, 0, 0.06), zorder=0)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color("#e9e3d6")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return path
+
+
 def plot_equity(equity: pd.DataFrame, path: str | Path, *, title: str = "Bankroll") -> Path:
     """Plot the bankroll over time from the betting simulation.
 
@@ -163,20 +241,54 @@ def plot_equity(equity: pd.DataFrame, path: str | Path, *, title: str = "Bankrol
 
 
 def plot_yearly_roi(yearly: pd.DataFrame, path: str | Path, *, title: str = "ROI by year") -> Path:
-    """Plot the year-on-year ROI of the betting simulation."""
+    """Plot the year-on-year ROI of the betting simulation.
+
+    Accepts either the aggregated table from
+    :func:`hkjc_nn.betting.yearly_roi` or the raw bets frame.
+    """
     plt = _pyplot()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    df = yearly.copy()
+    if "roi" not in df.columns:
+        if {"year", "profit", "staked"} <= set(df.columns):
+            df["roi"] = df["profit"] / df["staked"].replace(0, float("nan"))
+        else:
+            df["year"] = pd.to_datetime(df["meeting_date"]).dt.year
+            grouped = df.groupby("year").agg(staked=("stake", "sum"), profit=("profit", "sum"))
+            df = grouped.reset_index()
+            df["roi"] = df["profit"] / df["staked"].replace(0, float("nan"))
+
     fig, ax = plt.subplots(figsize=(7.0, 4.0))
-    if yearly is not None and not yearly.empty:
-        colours = ["#2b6cb0" if v >= 0 else "#c53030" for v in yearly["roi"]]
-        ax.bar(yearly["year"].astype(str), yearly["roi"], color=colours)
-        ax.axhline(0.0, color="black", lw=1)
+    if not df.empty:
+        colours = ["#2f6f5e" if v >= 0 else "#b06367" for v in df["roi"]]
+        ax.bar(df["year"].astype(str), df["roi"], color=colours)
+        ax.axhline(0.0, color="#14171e", lw=1)
+        for x, v in zip(df["year"].astype(str), df["roi"]):
+            ax.annotate(
+                f"{v:+.0%}",
+                (x, v),
+                textcoords="offset points",
+                xytext=(0, 5 if v >= 0 else -15),
+                ha="center",
+                fontsize=10,
+                fontfamily="monospace",
+                color="#3a4256",
+            )
+        # Leave room for the value labels so they never sit on the axis.
+        lo, hi = float(df["roi"].min()), float(df["roi"].max())
+        span = max(hi - lo, 0.05)
+        ax.set_ylim(min(lo - 0.16 * span, -0.02), max(hi + 0.16 * span, 0.02))
     ax.set_xlabel("year")
     ax.set_ylabel("ROI")
-    ax.set_title(title)
-    ax.grid(alpha=0.25, axis="y")
+    ax.yaxis.set_major_formatter(_percent_formatter())
+    ax.set_title(title, fontsize=13, color="#14171e", pad=12)
+    ax.grid(axis="y", color=(0, 0, 0, 0.05), zorder=0)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.spines["left"].set_color("#e9e3d6")
+    ax.spines["bottom"].set_color("#e9e3d6")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
